@@ -771,42 +771,48 @@ export default function App() {
                       const previewScore = item.calc(diceValues);
 
                       return (
-                        <td 
-                          key={p.id} 
-                          onClick={() => canRecord && recordScore(item.key, previewScore)}
-                          style={{ 
-                            textAlign: 'center', padding: '6px 2px',
-                            cursor: canRecord ? 'pointer' : 'default',
-                            backgroundColor: canRecord ? '#ebf5fb' : 'transparent',
-                            transition: 'background-color 0.2s'
-                          }}
-                        >
-                          {val !== null ? (
-                            <span style={{ fontWeight: 'bold', color: mine ? '#2980b9' : '#333' }}>{val}</span>
-                          ) : (
-                            canRecord ? (
-                              <div style={{ padding: '3px', border: '1px solid #27ae60', borderRadius: '4px', color: '#27ae60', fontWeight: 'bold', fontSize: '0.7rem', backgroundColor: '#e8f8f5' }}>
-                                {previewScore}점 기록
-                              </div>
-                            ) : <span style={{color:'#ccc'}}>-</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-
-                <tr style={{ backgroundColor: '#2980b9', color: '#fff', borderTop: '2px solid #2980b9' }}>
+                        <tr style={{ backgroundColor: '#2980b9', color: '#fff', borderTop: '2px solid #2980b9' }}>
                   <td style={{ padding: '8px 4px', fontWeight: 'bold' }}>TOTAL</td>
                   {gameState.players.map(p => {
                     const total = getTotalScore(p.scores);
                     return <td key={p.id} style={{ textAlign: 'center', padding: '8px 4px', fontWeight: '800', fontSize: '0.95rem' }}>{total}</td>;
                   })}
                 </tr>
-
               </tbody>
             </table>
           </div>
+
+          {/* ========================================================= */}
+          {/* 🌟 추가할 부분: 팝업 애니메이션 스타일과 팝업 UI 화면 🌟 */}
+          <style>
+            {`
+              @keyframes scoreFloatUp {
+                0% { opacity: 0; transform: translate(-50%, 50px) scale(0.5); }
+                15% { opacity: 1; transform: translate(-50%, 0px) scale(1.2); }
+                30% { opacity: 1; transform: translate(-50%, 0px) scale(1); }
+                80% { opacity: 1; transform: translate(-50%, -40px) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -60px) scale(0.8); }
+              }
+            `}
+          </style>
+
+          {scorePopup && (
+            <div style={{
+              position: 'fixed', /* 화면 기준으로 띄움 */
+              top: '40%',
+              left: '40%', /* 3D 캔버스(왼쪽) 중앙쯤에 오도록 설정 */
+              zIndex: 9999,
+              fontSize: '5rem',
+              fontWeight: '900',
+              color: '#FFD700',
+              textShadow: '0px 0px 20px rgba(255, 215, 0, 0.8), 2px 4px 0px #d35400',
+              pointerEvents: 'none', /* 마우스 클릭 방해 금지 */
+              animation: 'scoreFloatUp 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards'
+            }}>
+              {scorePopup}
+            </div>
+          )}
+          {/* ========================================================= */}
 
         </div>
       )}
