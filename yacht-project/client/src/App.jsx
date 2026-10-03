@@ -4,10 +4,17 @@ import { Physics, useBox, usePlane, useCompoundBody } from '@react-three/cannon'
 import * as THREE from 'three';
 import io from 'socket.io-client';
 
-// 🔴 다른 기기 접속용 서버 주소
+// 🔴 서버 주소 연결
 const socket = io.connect('https://game-site-j11p.onrender.com');
 
-// 🎵 팝업 효과음 함수 (안전한 버전)
+// 🌟 항목 이름 예쁘게 보여주기 위한 사전
+const CATEGORY_LABELS = {
+  ones: 'Aces', twos: 'Deuces', threes: 'Threes', fours: 'Fours', fives: 'Fives', sixes: 'Sixes',
+  choice: 'Choice', fourOfAKind: '4 of a Kind', fullHouse: 'Full House',
+  smallStraight: 'S. Straight', largeStraight: 'L. Straight', yacht: 'Yacht'
+};
+
+// 🎵 브라우저 내장 기능을 이용한 경쾌한 효과음 (안전 버전)
 const playScoreSound = () => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -344,6 +351,10 @@ export default function App() {
   const keepListRef = useRef(keepList);
   useEffect(() => { keepListRef.current = keepList; }, [keepList]);
 
+  // 🌟 상태 변화를 감지하기 위해 이전 게임 상태를 저장
+  const gameStateRef = useRef(null);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
   const isMyTurn = gameState && myId === gameState.currentTurnId;
   const hasRolledAtLeastOnce = gameState && gameState.rollsLeft < 3; 
 
@@ -363,6 +374,32 @@ export default function App() {
     });
 
     socket.on('sync_game_state', (state) => {
+      const oldState = gameStateRef.current;
+      
+      // 🌟 점수판이 갱신되었을 때 양쪽 모든 화면에서 소리와 팝업 띄우기
+      if (oldState && oldState.players && state.players) {
+        state.players.forEach(newP => {
+          const oldP = oldState.players.find(p => p.id === newP.id);
+          if (oldP) {
+            const oldScores = oldP.scores || {};
+            const newScores = newP.scores || {};
+            
+            for (const key in newScores) {
+              if (newScores[key] !== null && newScores[key] !== undefined && 
+                 (oldScores[key] === null || oldScores[key] === undefined)) {
+                
+                const label = CATEGORY_LABELS[key] || key; 
+                const scoreVal = newScores[key];
+                
+                playScoreSound();
+                setScorePopup(`${label}\n+${scoreVal}점`);
+                setTimeout(() => setScorePopup(null), 1500);
+              }
+            }
+          }
+        });
+      }
+
       setGameState(state);
       if (state.rollsLeft === 3) {
         setKeepList([false, false, false, false, false]);
@@ -442,17 +479,11 @@ export default function App() {
     socket.emit('sync_keep_list', newKeep); 
   };
 
-  // 🌟 점수 기록 시 효과음과 팝업 띄우기
   const recordScore = (category, score) => {
     socket.emit('request_record_score', { category, score });
     setKeepList([false, false, false, false, false]);
     setCupStatus('idle');
-
-    playScoreSound();
-    setScorePopup(`+${score}점`);
-    setTimeout(() => {
-      setScorePopup(null);
-    }, 1500);
+    // 여기서 나던 팝업/효과음 기능은 위의 sync_game_state로 이동시켜 양쪽에서 모두 나도록 수정됨
   };
 
   const handleUpdateValue = (id, value) => {
@@ -768,7 +799,7 @@ export default function App() {
             </table>
           </div>
 
-          {/* 🌟 팝업 화면: 화면 정중앙 배치 & React 전용 애니메이션 태그 사용 */}
+          {/* 🌟 팝업 화면: 양쪽 모두 보이도록 중앙 배치 및 줄바꿈 속성 추가 */}
           <style dangerouslySetInnerHTML={{
             __html: `
               @keyframes scoreFloatUp {
@@ -788,11 +819,13 @@ export default function App() {
               left: '50%',
               transform: 'translate(-50%, -50%)',
               zIndex: 99999,
-              fontSize: '6rem',
+              fontSize: '4.5rem',
               fontWeight: '900',
               color: '#FFD700',
               textShadow: '0px 0px 20px rgba(255, 215, 0, 0.8), 2px 4px 0px #d35400',
               pointerEvents: 'none',
+              textAlign: 'center', 
+              whiteSpace: 'pre-wrap', /* 🚨 줄바꿈(\n) 인식 옵션 */
               animation: 'scoreFloatUp 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards'
             }}>
               {scorePopup}
