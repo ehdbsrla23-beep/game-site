@@ -123,7 +123,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   );
 
   const prevKept = useRef(isKept);
-  const targetQuatRef = useRef(null); // 🌟 스무딩(자석 효과)을 위해 목표 각도를 임시 저장하는 곳
+  const targetQuatRef = useRef(null); 
 
   useEffect(() => {
     const unsubPos = api.position.subscribe((p) => positionRef.current = p);
@@ -133,16 +133,27 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
-  // 🚨 [핵심 수정 1] 킵 해제 시 강제로 6(정방향)으로 돌려버리던 버그 수정
+  // 🚨 [핵심 수정] 킵 해제 시 숫자가 6으로 굳어버리는 물리엔진 오류 완벽 해결
   useEffect(() => {
-    if (prevKept.current && !isKept) {
-      // 위치만 초기 자리로 돌려놓고, 기존에 갖고 있던 각도(숫자)와 텍스처는 건드리지 않습니다!
+    if (isKept) {
+      api.mass.set(0); // 킵 상태일 땐 허공에 얼려버려서 끝없이 추락하는 것을 막음
+    } else if (prevKept.current && !isKept) {
+      api.mass.set(1); // 킵 해제 시 다시 중력 부여
+      
+      // 1. 주사위를 강제로 반듯한 정방향(윗면 6)으로 스르륵 일어서게 만듭니다.
+      targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0));
+      
+      // 2. 물리적 윗면이 6이 되므로, 6번 면에 현재 진짜 숫자(syncedValue)를 강제로 다시 그려줍니다.
+      currentTopFaceRef.current = 6;
+      setMaterials(getDynamicMaterials(syncedValue || 6, 6));
+      
+      // 3. 바닥을 뚫고 튀어오르지 않도록 안전한 높이(0.35)로 순간이동
       api.position.set(initialPos[0], 0.35, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
     }
     prevKept.current = isKept;
-  }, [isKept, api, initialPos]);
+  }, [isKept, api, initialPos, syncedValue]);
 
   useEffect(() => {
     if (cupStatus === 'shaking') {
@@ -151,7 +162,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       stuckFramesRef.current = 0;
       dropFramesRef.current = 0;
       spillFramesRef.current = 0;
-      targetQuatRef.current = null; // 컵에 들어가면 스무딩 효과 리셋
+      targetQuatRef.current = null; 
       setMaterials(getDynamicMaterials(null, 1)); 
       
       api.position.set(
@@ -182,15 +193,13 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       return;
     }
 
-    // 🌟 [핵심 수정 2] 모서리에 걸려 억지로 눕혀야 할 때(forceSnap), 부드럽게 스르륵(Lerp) 회전시킵니다.
     if (targetQuatRef.current) {
-      quaternionRef.current.slerp(targetQuatRef.current, 0.15); // 0.15 속도로 부드럽게 회전
+      quaternionRef.current.slerp(targetQuatRef.current, 0.15); 
       api.quaternion.set(quaternionRef.current.x, quaternionRef.current.y, quaternionRef.current.z, quaternionRef.current.w);
-      // 목표 각도에 거의 도달하면 스무딩 멈춤
       if (quaternionRef.current.angleTo(targetQuatRef.current) < 0.05) {
         targetQuatRef.current = null; 
       }
-      return;
+      return; 
     }
 
     if (cupStatus === 'shaking') {
@@ -246,9 +255,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
         currentTopFaceRef.current = face;
         
         if (forceSnap) {
-          // 순식간에 꺾이던 api.rotation.set()을 지우고, 목표 각도(targetQuat)만 지정해줍니다.
           targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
-          
           api.position.set(positionRef.current[0], 0.35, positionRef.current[2]);
           api.velocity.set(0, 0, 0);
           api.angularVelocity.set(0, 0, 0);
@@ -278,7 +285,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     </mesh>
   );
 }
-
 function DiceCup({ status }) {
   const [ref, api] = useCompoundBody(() => ({
     mass: 0, type: 'Kinematic', position: [0, 15, -10],
