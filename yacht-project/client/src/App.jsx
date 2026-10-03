@@ -14,7 +14,7 @@ const CATEGORY_LABELS = {
   smallStraight: 'S. Straight', largeStraight: 'L. Straight', yacht: 'Yacht'
 };
 
-// 🎵 브라우저 내장 기능을 이용한 경쾌한 효과음 (안전 버전)
+// 🎵 브라우저 내장 기능을 이용한 경쾌한 효과음
 const playScoreSound = () => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -125,9 +125,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
 
   const isSettledRef = useRef(isInitiallySettled);
   const currentTopFaceRef = useRef(isInitiallySettled ? (syncedValue || 6) : 1); 
-
   const prevKept = useRef(isKept);
-  const targetQuatRef = useRef(null); 
 
   const faces = [
     { num: 1, vector: new THREE.Vector3(0, -1, 0), targetRot: [Math.PI, 0, 0] }, 
@@ -146,6 +144,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
+  // 🚨 킵 해제 시 돌지 않고 즉시 고정
   useEffect(() => {
     if (isKept) {
       api.mass.set(0); 
@@ -164,8 +163,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       api.position.set(initialPos[0], 0.325, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
-      
-      targetQuatRef.current = null; 
     }
     prevKept.current = isKept;
   }, [isKept, api, initialPos, syncedValue]);
@@ -177,7 +174,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       stuckFramesRef.current = 0;
       dropFramesRef.current = 0;
       spillFramesRef.current = 0;
-      targetQuatRef.current = null; 
       
       api.position.set(
         (Math.random() - 0.5) * 1.5,
@@ -193,12 +189,15 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
   }, [cupStatus, api]);
 
+  // 🚨 결과 동기화 시 돌면서 맞춰지는 현상 완벽 제거 (즉시 스냅)
   useEffect(() => {
     if (isSettledRef.current && syncedValue !== null) {
       if (currentTopFaceRef.current !== syncedValue) {
         const target = faces.find(f => f.num === syncedValue);
         if (target) {
-          targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+          const exactQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+          api.quaternion.set(exactQuat.x, exactQuat.y, exactQuat.z, exactQuat.w);
+          quaternionRef.current.copy(exactQuat);
           currentTopFaceRef.current = syncedValue;
         }
       }
@@ -211,15 +210,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
       return;
-    }
-
-    if (targetQuatRef.current) {
-      quaternionRef.current.slerp(targetQuatRef.current, 0.15); 
-      api.quaternion.set(quaternionRef.current.x, quaternionRef.current.y, quaternionRef.current.z, quaternionRef.current.w);
-      if (quaternionRef.current.angleTo(targetQuatRef.current) < 0.05) {
-        targetQuatRef.current = null; 
-      }
-      return; 
     }
 
     if (cupStatus === 'shaking') {
@@ -266,7 +256,9 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
         currentTopFaceRef.current = face;
         
         if (forceSnap) {
-          targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
+          const exactQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
+          api.quaternion.set(exactQuat.x, exactQuat.y, exactQuat.z, exactQuat.w);
+          quaternionRef.current.copy(exactQuat);
           api.position.set(positionRef.current[0], 0.325, positionRef.current[2]);
           api.velocity.set(0, 0, 0);
           api.angularVelocity.set(0, 0, 0);
@@ -337,7 +329,7 @@ function DiceCup({ status }) {
 }
 
 export default function App() {
-  const [scorePopup, setScorePopup] = useState(null);
+  const [scorePopup, setScorePopup] = useState(null); // 이제 문자열 대신 { label, score } 객체 저장
   const [myId, setMyId] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [maxPlayersSelect, setMaxPlayersSelect] = useState(2);
@@ -351,7 +343,6 @@ export default function App() {
   const keepListRef = useRef(keepList);
   useEffect(() => { keepListRef.current = keepList; }, [keepList]);
 
-  // 🌟 상태 변화를 감지하기 위해 이전 게임 상태를 저장
   const gameStateRef = useRef(null);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
 
@@ -376,7 +367,6 @@ export default function App() {
     socket.on('sync_game_state', (state) => {
       const oldState = gameStateRef.current;
       
-      // 🌟 점수판이 갱신되었을 때 양쪽 모든 화면에서 소리와 팝업 띄우기
       if (oldState && oldState.players && state.players) {
         state.players.forEach(newP => {
           const oldP = oldState.players.find(p => p.id === newP.id);
@@ -392,8 +382,10 @@ export default function App() {
                 const scoreVal = newScores[key];
                 
                 playScoreSound();
-                setScorePopup(`${label}\n+${scoreVal}점`);
-                setTimeout(() => setScorePopup(null), 1500);
+                setScorePopup({ label, score: scoreVal }); // 🌟 문자열이 아닌 객체로 저장
+                
+                // 2초 후 자연스럽게 사라지게 처리
+                setTimeout(() => setScorePopup(null), 2000); 
               }
             }
           }
@@ -483,7 +475,6 @@ export default function App() {
     socket.emit('request_record_score', { category, score });
     setKeepList([false, false, false, false, false]);
     setCupStatus('idle');
-    // 여기서 나던 팝업/효과음 기능은 위의 sync_game_state로 이동시켜 양쪽에서 모두 나도록 수정됨
   };
 
   const handleUpdateValue = (id, value) => {
@@ -799,15 +790,14 @@ export default function App() {
             </table>
           </div>
 
-          {/* 🌟 팝업 화면: 양쪽 모두 보이도록 중앙 배치 및 줄바꿈 속성 추가 */}
+          {/* 🌟 수정된 팝업 UI: 움직임 없이 네모 상자 형태로 자연스럽게 Fade In/Out */}
           <style dangerouslySetInnerHTML={{
             __html: `
-              @keyframes scoreFloatUp {
-                0% { opacity: 0; transform: translate(-50%, -10px) scale(0.5); }
-                15% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-                30% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-                80% { opacity: 1; transform: translate(-50%, -90px) scale(1); }
-                100% { opacity: 0; transform: translate(-50%, -110px) scale(0.8); }
+              @keyframes smoothFade {
+                0% { opacity: 0; }
+                10% { opacity: 1; }
+                80% { opacity: 1; }
+                100% { opacity: 0; }
               }
             `
           }} />
@@ -819,16 +809,21 @@ export default function App() {
               left: '50%',
               transform: 'translate(-50%, -50%)',
               zIndex: 99999,
-              fontSize: '4.5rem',
-              fontWeight: '900',
-              color: '#FFD700',
-              textShadow: '0px 0px 20px rgba(255, 215, 0, 0.8), 2px 4px 0px #d35400',
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              padding: '30px 60px',
+              borderRadius: '20px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              boxShadow: '0 15px 40px rgba(0,0,0,0.4)',
+              textAlign: 'center',
               pointerEvents: 'none',
-              textAlign: 'center', 
-              whiteSpace: 'pre-wrap', /* 🚨 줄바꿈(\n) 인식 옵션 */
-              animation: 'scoreFloatUp 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards'
+              animation: 'smoothFade 2s ease-in-out forwards'
             }}>
-              {scorePopup}
+              <div style={{ fontSize: '1.8rem', color: '#ecf0f1', fontWeight: 'bold', marginBottom: '8px', letterSpacing: '2px' }}>
+                {scorePopup.label}
+              </div>
+              <div style={{ fontSize: '4.5rem', color: '#FFD700', fontWeight: '900', textShadow: '0px 4px 15px rgba(255, 215, 0, 0.3)' }}>
+                +{scorePopup.score}
+              </div>
             </div>
           )}
 
