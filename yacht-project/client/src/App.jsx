@@ -4,19 +4,23 @@ import { Physics, useBox, usePlane, useCompoundBody } from '@react-three/cannon'
 import * as THREE from 'three';
 import io from 'socket.io-client';
 
-// 🎵 브라우저 내장 기능을 이용한 경쾌한 효과음 (파일 필요 없음!)
+// 🔴 다른 기기 접속용 서버 주소
+const socket = io.connect('https://game-site-j11p.onrender.com');
+
+// 🎵 팝업 효과음 함수 (안전한 버전)
 const playScoreSound = () => {
   try {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return; 
+
+    const audioCtx = new AudioContext();
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
 
     oscillator.type = 'sine';
-    // '띠링~' 하는 느낌을 위해 주파수를 빠르게 높임 (도 -> 높은 도)
     oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); 
     oscillator.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.1); 
 
-    // 소리가 부드럽게 사라지도록 볼륨 조절
     gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
     gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
@@ -26,54 +30,33 @@ const playScoreSound = () => {
     oscillator.start();
     oscillator.stop(audioCtx.currentTime + 0.5);
   } catch (e) {
-    console.warn('오디오를 지원하지 않는 브라우저입니다.');
+    console.warn('효과음 재생 불가:', e);
   }
 };
-// 🔴 다른 기기에서 접속하려면 localhost 대신 본체 IP(예: 192.168.0.x)로 변경하세요.
-const socket = io.connect('https://game-site-j11p.onrender.com');
 
-import { useRef, useEffect } from 'react';
-import { useBox } from '@react-three/cannon';
-
-export function Dice({ isKept, ...props }) {
-  // 1. 현재 위치와 각도를 기억할 공간(Ref) 만들기
-  const positionRef = useRef([0, 0, 0]);
-  const rotationRef = useRef([0, 0, 0]);
-
-  const [ref, api] = useBox(() => ({
-    mass: isKept ? 0 : 1, // 킵 상태면 무게를 0으로 만들어 허공에 고정
-    // 2. 렌더링될 때 기본값이 아닌, 기억해둔 마지막 위치와 각도 사용
-    position: positionRef.current,
-    rotation: rotationRef.current,
-    ...props
-  }));
-
-  // 3. 물리 엔진이 주사위를 굴릴 때마다 실시간으로 현재 위치/각도 백업
-  useEffect(() => {
-    const unsubPos = api.position.subscribe((p) => {
-      positionRef.current = p;
-    });
-    const unsubRot = api.rotation.subscribe((r) => {
-      rotationRef.current = r;
-    });
-
-    // 컴포넌트가 사라질 때 추적 중지
-    return () => {
-      unsubPos();
-      unsubRot();
-    };
-  }, [api]);
-
-  return (
-    <mesh ref={ref}>
-      {/* 주사위 재질 및 형태 코드는 기존 그대로 유지 */}
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="white" />
-    </mesh>
-  );
+// 🎨 주사위 텍스처 생성 함수
+function createDiceTexture(number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  
+  ctx.fillStyle = '#ffffff'; 
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = '#000000';
+  
+  const drawDot = (x, y) => { ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.fill(); };
+  const pos = { c: 128, l: 64, r: 192, t: 64, b: 192 };
+  
+  if (number === 1) { drawDot(pos.c, pos.c); }
+  else if (number === 2) { drawDot(pos.l, pos.t); drawDot(pos.r, pos.b); }
+  else if (number === 3) { drawDot(pos.l, pos.t); drawDot(pos.c, pos.c); drawDot(pos.r, pos.b); }
+  else if (number === 4) { drawDot(pos.l, pos.t); drawDot(pos.r, pos.t); drawDot(pos.l, pos.b); drawDot(pos.r, pos.b); }
+  else if (number === 5) { drawDot(pos.l, pos.t); drawDot(pos.r, pos.t); drawDot(pos.c, pos.c); drawDot(pos.l, pos.b); drawDot(pos.r, pos.b); }
+  else if (number === 6) { drawDot(pos.l, pos.t); drawDot(pos.r, pos.t); drawDot(pos.l, pos.c); drawDot(pos.r, pos.c); drawDot(pos.l, pos.b); drawDot(pos.r, pos.b); }
+  
+  return new THREE.CanvasTexture(canvas);
 }
 
-// 기존의 diceTextures 배열 아래쪽에 추가해 주세요.
 const diceTextures = [
   createDiceTexture(1), createDiceTexture(2), createDiceTexture(3),
   createDiceTexture(4), createDiceTexture(5), createDiceTexture(6)
@@ -104,21 +87,6 @@ function Arena() {
   );
 }
 
-  const texMapping = { 0: 2, 1: 3, 2: 5, 3: 0, 4: 1, 5: 4 };
-  if (syncedValue && currentTopFace) {
-    const upIdx = faceToMaterialIdx[currentTopFace];
-    if (upIdx !== undefined) texMapping[upIdx] = syncedValue - 1; 
-  }
-  return [
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[0]] }),
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[1]] }),
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[2]] }),
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[3]] }),
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[4]] }),
-    new THREE.MeshStandardMaterial({ map: diceTextures[texMapping[5]] })
-  ];
-};
-
 function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, initialPos, visible }) {
   const isInitiallySettled = cupStatus === 'settled'; 
 
@@ -126,7 +94,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     mass: 1,
     args: [0.65, 0.65, 0.65],
     position: isInitiallySettled 
-      ? [initialPos[0], 0.325, initialPos[1]] // 🚨 0.35에서 0.325(바닥 밀착)로 변경
+      ? [initialPos[0], 0.325, initialPos[1]] 
       : [
           (Math.random() - 0.5) * 1.5,
           3.5 + Math.random() * 1.0,
@@ -171,7 +139,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
-  // 🚨 [핵심 수정] 킵 해제 시 물리 엔진 충돌 방지 로직
   useEffect(() => {
     if (isKept) {
       api.mass.set(0); 
@@ -181,19 +148,17 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       const target = faces.find(f => f.num === targetNum);
       
       if (target) {
-        // 부드럽게 도는 애니메이션(slerp)을 버리고 즉시 완벽한 정답 각도로 강제 꽂음
         const exactQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
         api.quaternion.set(exactQuat.x, exactQuat.y, exactQuat.z, exactQuat.w);
         quaternionRef.current.copy(exactQuat);
       }
       currentTopFaceRef.current = targetNum;
       
-      // 높이를 주사위 크기의 절반(0.65 / 2 = 0.325)으로 설정해 바닥과 충돌(튕김)을 원천 차단
       api.position.set(initialPos[0], 0.325, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
       
-      targetQuatRef.current = null; // slerp 무효화
+      targetQuatRef.current = null; 
     }
     prevKept.current = isKept;
   }, [isKept, api, initialPos, syncedValue]);
@@ -295,7 +260,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
         
         if (forceSnap) {
           targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
-          // 🚨 여기서도 0.35에서 0.325로 수정
           api.position.set(positionRef.current[0], 0.325, positionRef.current[2]);
           api.velocity.set(0, 0, 0);
           api.angularVelocity.set(0, 0, 0);
@@ -478,16 +442,14 @@ export default function App() {
     socket.emit('sync_keep_list', newKeep); 
   };
 
+  // 🌟 점수 기록 시 효과음과 팝업 띄우기
   const recordScore = (category, score) => {
     socket.emit('request_record_score', { category, score });
     setKeepList([false, false, false, false, false]);
     setCupStatus('idle');
 
-    // 🌟 효과음 재생 및 "+몇점" 팝업 띄우기
     playScoreSound();
     setScorePopup(`+${score}점`);
-    
-    // 1.5초 뒤에 팝업 다시 숨기기
     setTimeout(() => {
       setScorePopup(null);
     }, 1500);
@@ -638,7 +600,6 @@ export default function App() {
                 <Arena />
                 <DiceCup status={cupStatus} />
                 
-                {/* ⭐️ 컴포넌트 삭제 로직을 없애고 visible 속성으로 통제 */}
                 <group>
                   {[0, 1, 2, 3, 4].map((id) => (
                     <Dice 
@@ -700,7 +661,6 @@ export default function App() {
             </div>
           </div>
 
-         {/* 👇 여기서부터 끝까지 복사해서 기존 코드 하단을 덮어써주세요! */}
           <div style={{ width: '270px', backgroundColor: '#fff', padding: '12px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', overflowY: 'auto' }}>
             <h3 style={{ textAlign: 'center', margin: '0 0 10px 0', color: '#2c3e50', fontSize: '1.1rem' }}>SCORE BOARD</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -808,27 +768,27 @@ export default function App() {
             </table>
           </div>
 
-          {/* ========================================================= */}
-          {/* 🌟 애니메이션 스타일 및 팝업 화면 🌟 */}
-          <style>
-            {`
+          {/* 🌟 팝업 화면: 화면 정중앙 배치 & React 전용 애니메이션 태그 사용 */}
+          <style dangerouslySetInnerHTML={{
+            __html: `
               @keyframes scoreFloatUp {
-                0% { opacity: 0; transform: translate(-50%, 50px) scale(0.5); }
-                15% { opacity: 1; transform: translate(-50%, 0px) scale(1.2); }
-                30% { opacity: 1; transform: translate(-50%, 0px) scale(1); }
-                80% { opacity: 1; transform: translate(-50%, -40px) scale(1); }
-                100% { opacity: 0; transform: translate(-50%, -60px) scale(0.8); }
+                0% { opacity: 0; transform: translate(-50%, -10px) scale(0.5); }
+                15% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+                30% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                80% { opacity: 1; transform: translate(-50%, -90px) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -110px) scale(0.8); }
               }
-            `}
-          </style>
+            `
+          }} />
 
           {scorePopup && (
             <div style={{
               position: 'fixed',
-              top: '40%',
-              left: '40%',
-              zIndex: 9999,
-              fontSize: '5rem',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 99999,
+              fontSize: '6rem',
               fontWeight: '900',
               color: '#FFD700',
               textShadow: '0px 0px 20px rgba(255, 215, 0, 0.8), 2px 4px 0px #d35400',
@@ -838,7 +798,6 @@ export default function App() {
               {scorePopup}
             </div>
           )}
-          {/* ========================================================= */}
 
         </div>
       )}
