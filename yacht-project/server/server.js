@@ -1,166 +1,98 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
 
 const app = express();
-app.use(cors());
-
 const server = http.createServer(app);
+
+// 🚨 클라우드(Vercel) 배포용 CORS 설정: 모든 접속 허용
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
 
+// 게임 방 목록을 관리할 객체
 const rooms = {};
 
-const generateRoomId = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  let result = '';
-  for (let i = 0; i < 4; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return rooms[result] ? generateRoomId() : result;
-};
-
-const broadcastRoomList = () => {
-  const roomList = Object.keys(rooms)
-    .filter(roomId => !rooms[roomId].isGameStarted && rooms[roomId].players.length < rooms[roomId].maxPlayers)
-    .map(roomId => ({
-      roomId,
-      current: rooms[roomId].players.length,
-      max: rooms[roomId].maxPlayers
-    }));
-  io.emit('room_list_update', roomList);
-};
-
 io.on('connection', (socket) => {
-  console.log(`🔌 접속: ${socket.id}`);
-  broadcastRoomList();
+  console.log('🟢 유저 접속됨:', socket.id);
 
-  socket.on('create_room', ({ maxPlayers }) => {
-    const roomId = generateRoomId();
-    rooms[roomId] = {
-      roomId,
-      maxPlayers: Number(maxPlayers) || 2,
-      isGameStarted: false,
-      players: [],
-      currentTurnIndex: 0,
-      rollsLeft: 3,
-    };
-    socket.emit('room_created', roomId);
-    broadcastRoomList();
+  // 1. 방 만들기
+  socket.on('createRoom', () => {
+    // 4자리 랜덤 방 코드 생성
+    const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+    rooms[roomCode] = { players: [socket.id] };
+    socket.join(roomCode);
+    
+    // 방을 만든 사람에게 방 코드 전달
+    socket.emit('roomCreated', roomCode);
+    console.log(`🏠 방 생성됨: ${roomCode} (방장: ${socket.id})`);
   });
 
-  socket.on('join_room', ({ roomId }) => {
-    const room = rooms[roomId];
-    if (!room) return socket.emit('error_message', '존재하지 않는 방입니다.');
-    if (room.isGameStarted) return socket.emit('error_message', '이미 시작된 방입니다.');
-    if (room.players.length >= room.maxPlayers) return socket.emit('error_message', '방이 가득 찼습니다.');
-
-    socket.join(roomId);
-    room.players.push({
-      id: socket.id,
-      scores: {
-        ones: null, twos: null, threes: null, fours: null, fives: null, sixes: null,
-        choice: null, fourOfAKind: null, fullHouse: null, smallStraight: null, largeStraight: null, yacht: null
-      }
-    });
-
-    if (room.players.length === room.maxPlayers) {
-      room.isGameStarted = true;
-      room.currentTurnIndex = 0;
-      room.rollsLeft = 3;
+  // 2. 방 참가하기
+  socket.on('joinRoom', (roomCode) => {
+    if (rooms[roomCode]) {
+      rooms[roomCode].players.push(socket.id);
+      socket.join(roomCode);
+      socket.emit('joinedRoom', roomCode);
+      
+      // 방에 있던 다른 사람들에게 새 유저 접속 알림
+      socket.to(roomCode).emit('playerJoined', socket.id);
+      console.log(`🏃 유저 ${socket.id} 가 방 ${roomCode} 에 참가함`);
+    } else {
+      socket.emit('errorMsg', '존재하지 않는 방입니다.');
     }
-
-    io.to(roomId).emit('sync_game_state', getPublicGameState(room));
-    broadcastRoomList();
   });
 
-  socket.on('request_roll_dice', () => {
-    const roomId = getRoomIdBySocket(socket.id);
-    if (!roomId) return;
-    const room = rooms[roomId];
-
-    if (!room || !room.isGameStarted) return;
-    if (room.players[room.currentTurnIndex].id !== socket.id) return;
-    if (room.rollsLeft <= 0) return;
-
-    room.rollsLeft -= 1;
-    io.to(roomId).emit('trigger_shake_cup');
-    io.to(roomId).emit('sync_game_state', getPublicGameState(room));
+  // 3. 주사위 & 컵 물리 엔진 굴리기 동기화
+  socket.on('rollDice', (data) => {
+    const { roomCode, diceData } = data;
+    // 내가 굴린 물리엔진 결과를 방 안의 다른 사람 화면에도 똑같이 적용
+    socket.to(roomCode).emit('diceRolled', diceData);
   });
 
-  socket.on('sync_dice_values', (newVals) => {
-    const roomId = getRoomIdBySocket(socket.id);
-    if (!roomId) return;
-    socket.broadcast.to(roomId).emit('update_dice_values', newVals);
+  // 4. 주사위 회전 고정 및 6면체 버그 방지 결과 동기화
+  socket.on('syncDiceResult', (data) => {
+    const { roomCode, finalValues } = data;
+    socket.to(roomCode).emit('diceResultSynced', finalValues);
   });
 
-  socket.on('sync_keep_list', (keepList) => {
-    const roomId = getRoomIdBySocket(socket.id);
-    if (!roomId) return;
-    socket.broadcast.to(roomId).emit('update_keep_list', keepList);
+  // 5. 점수판 및 턴 넘기기 동기화
+  socket.on('updateScore', (data) => {
+    const { roomCode, scoreData } = data;
+    socket.to(roomCode).emit('scoreUpdated', scoreData);
   });
 
-  socket.on('request_record_score', ({ category, score }) => {
-    const roomId = getRoomIdBySocket(socket.id);
-    if (!roomId) return;
-    const room = rooms[roomId];
-
-    if (!room || !room.isGameStarted) return;
-    const currentPlayer = room.players[room.currentTurnIndex];
-    if (currentPlayer.id !== socket.id) return;
-    if (currentPlayer.scores[category] !== null) return;
-
-    currentPlayer.scores[category] = score;
-    room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
-    room.rollsLeft = 3;
-
-    io.to(roomId).emit('sync_game_state', getPublicGameState(room));
+  socket.on('nextTurn', (roomCode) => {
+    socket.to(roomCode).emit('turnChanged');
   });
 
-  socket.on('leave_room', () => handleUserLeave(socket));
-  socket.on('disconnect', () => handleUserLeave(socket));
+  // 6. 유저 접속 종료 처리
+  socket.on('disconnect', () => {
+    console.log('🔴 유저 접속 해제:', socket.id);
+    
+    // 유저가 속해있던 방을 찾아내서 정리
+    for (const roomCode in rooms) {
+      const index = rooms[roomCode].players.indexOf(socket.id);
+      if (index !== -1) {
+        rooms[roomCode].players.splice(index, 1);
+        socket.to(roomCode).emit('playerLeft', socket.id);
+        
+        // 방에 남은 사람이 0명이면 메모리에서 방 삭제
+        if (rooms[roomCode].players.length === 0) {
+          delete rooms[roomCode];
+          console.log(`🗑️ 빈 방 삭제됨: ${roomCode}`);
+        }
+        break;
+      }
+    }
+  });
 });
 
-const handleUserLeave = (socket) => {
-  const roomId = getRoomIdBySocket(socket.id);
-  if (!roomId || !rooms[roomId]) return;
-
-  const room = rooms[roomId];
-  room.players = room.players.filter(p => p.id !== socket.id);
-  socket.leave(roomId);
-  socket.emit('left_room');
-
-  if (room.players.length === 0) {
-    delete rooms[roomId];
-  } else {
-    room.isGameStarted = false;
-    io.to(roomId).emit('error_message', '상대방이 퇴장하여 방이 해제되었습니다.');
-    io.to(roomId).emit('left_room');
-    delete rooms[roomId];
-  }
-  broadcastRoomList();
-};
-
-const getRoomIdBySocket = (socketId) => {
-  for (const roomId in rooms) {
-    if (rooms[roomId].players.some(p => p.id === socketId)) return roomId;
-  }
-  return null;
-}
-
-const getPublicGameState = (room) => ({
-  roomId: room.roomId,
-  maxPlayers: room.maxPlayers,
-  isGameStarted: room.isGameStarted,
-  currentTurnId: room.isGameStarted ? room.players[room.currentTurnIndex].id : null,
-  rollsLeft: room.rollsLeft,
-  players: room.players
+// 🚨 클라우드(Render) 배포용 포트 설정
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, () => {
+  console.log(`🚀 서버 구동 완료: 포트 ${PORT}에서 대기 중`);
 });
-
-const PORT = 4000;
-server.listen(PORT, () => console.log(`🚀 서버 실행 중: 포트 ${PORT}`));
