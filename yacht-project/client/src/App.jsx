@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import io from 'socket.io-client';
 
 // 🔴 다른 기기에서 접속하려면 localhost 대신 본체 IP(예: 192.168.0.x)로 변경하세요.
-const socket = io.connect('https://game-site-j11p.onrender.com');
+const socket = io.connect('[https://game-site-j11p.onrender.com](https://game-site-j11p.onrender.com)');
 
 const createDiceTexture = (number) => {
   const canvas = document.createElement('canvas');
