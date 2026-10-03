@@ -156,6 +156,25 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
   }, [syncedValue]);
 
+  useEffect(() => {
+  // 1. 서버와 연결되었을 때
+  socket.on('connect', () => {
+    console.log('✅ 서버와 연결 성공! 내 ID:', socket.id);
+  });
+
+  // 2. 방이 성공적으로 만들어졌을 때
+  socket.on('roomCreated', (roomCode) => {
+    console.log('🏠 방 생성 완료! 방 번호:', roomCode);
+    // 여기에 화면을 게임 창으로 넘기거나 방 번호를 띄우는 상태 업데이트 코드가 있어야 합니다.
+    // 예: setRoomCode(roomCode); setIsPlaying(true);
+  });
+
+  return () => {
+    socket.off('connect');
+    socket.off('roomCreated');
+  };
+}, []);
+
   useFrame(() => {
     // ⭐️ 삭제(Unmount) 대신 보이지 않거나 킵된 주사위는 물리엔진 간섭을 막기 위해 지하(-100)로 텔레포트
     if (!visible || isKept) {
