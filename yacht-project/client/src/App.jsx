@@ -48,9 +48,19 @@ export function Dice({ isKept, ...props }) {
   );
 }
 
+// 기존의 diceTextures 배열 아래쪽에 추가해 주세요.
 const diceTextures = [
   createDiceTexture(1), createDiceTexture(2), createDiceTexture(3),
   createDiceTexture(4), createDiceTexture(5), createDiceTexture(6)
+];
+
+const staticMaterials = [
+  new THREE.MeshStandardMaterial({ map: diceTextures[2] }), // 3
+  new THREE.MeshStandardMaterial({ map: diceTextures[3] }), // 4
+  new THREE.MeshStandardMaterial({ map: diceTextures[5] }), // 6
+  new THREE.MeshStandardMaterial({ map: diceTextures[0] }), // 1
+  new THREE.MeshStandardMaterial({ map: diceTextures[1] }), // 2
+  new THREE.MeshStandardMaterial({ map: diceTextures[4] })  // 5
 ];
 
 function Arena() {
@@ -69,8 +79,6 @@ function Arena() {
   );
 }
 
-const faceToMaterialIdx = { 1: 3, 2: 4, 3: 0, 4: 1, 5: 5, 6: 2 };
-const getDynamicMaterials = (syncedValue, currentTopFace) => {
   const texMapping = { 0: 2, 1: 3, 2: 5, 3: 0, 4: 1, 5: 4 };
   if (syncedValue && currentTopFace) {
     const upIdx = faceToMaterialIdx[currentTopFace];
@@ -116,14 +124,20 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   const spillFramesRef = useRef(0);
 
   const isSettledRef = useRef(isInitiallySettled);
-  const currentTopFaceRef = useRef(isInitiallySettled ? 6 : 1); 
-
-  const [materials, setMaterials] = useState(() => 
-    getDynamicMaterials(isInitiallySettled ? (syncedValue || 6) : null, isInitiallySettled ? 6 : 1)
-  );
+  const currentTopFaceRef = useRef(isInitiallySettled ? (syncedValue || 6) : 1); 
 
   const prevKept = useRef(isKept);
   const targetQuatRef = useRef(null); 
+
+  // 주사위 6면의 물리적 방향과 회전값 정의
+  const faces = [
+    { num: 1, vector: new THREE.Vector3(0, -1, 0), targetRot: [Math.PI, 0, 0] }, 
+    { num: 2, vector: new THREE.Vector3(0, 0, 1), targetRot: [-Math.PI/2, 0, 0] },
+    { num: 3, vector: new THREE.Vector3(1, 0, 0), targetRot: [0, 0, Math.PI/2] }, 
+    { num: 4, vector: new THREE.Vector3(-1, 0, 0), targetRot: [0, 0, -Math.PI/2] },
+    { num: 5, vector: new THREE.Vector3(0, 0, -1), targetRot: [Math.PI/2, 0, 0] }, 
+    { num: 6, vector: new THREE.Vector3(0, 1, 0), targetRot: [0, 0, 0] }
+  ];
 
   useEffect(() => {
     const unsubPos = api.position.subscribe((p) => positionRef.current = p);
@@ -133,21 +147,20 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
-  // 🚨 [핵심 수정] 킵 해제 시 숫자가 6으로 굳어버리는 물리엔진 오류 완벽 해결
+  // 킵 해제 시, 강제로 6이 되지 않고 원래 가지고 있던 번호의 각도로 복구
   useEffect(() => {
     if (isKept) {
-      api.mass.set(0); // 킵 상태일 땐 허공에 얼려버려서 끝없이 추락하는 것을 막음
+      api.mass.set(0); 
     } else if (prevKept.current && !isKept) {
-      api.mass.set(1); // 킵 해제 시 다시 중력 부여
+      api.mass.set(1); 
+      const targetNum = syncedValue || currentTopFaceRef.current || 6;
+      const target = faces.find(f => f.num === targetNum);
       
-      // 1. 주사위를 강제로 반듯한 정방향(윗면 6)으로 스르륵 일어서게 만듭니다.
-      targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0));
+      if (target) {
+        targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+      }
+      currentTopFaceRef.current = targetNum;
       
-      // 2. 물리적 윗면이 6이 되므로, 6번 면에 현재 진짜 숫자(syncedValue)를 강제로 다시 그려줍니다.
-      currentTopFaceRef.current = 6;
-      setMaterials(getDynamicMaterials(syncedValue || 6, 6));
-      
-      // 3. 바닥을 뚫고 튀어오르지 않도록 안전한 높이(0.35)로 순간이동
       api.position.set(initialPos[0], 0.35, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
@@ -163,7 +176,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       dropFramesRef.current = 0;
       spillFramesRef.current = 0;
       targetQuatRef.current = null; 
-      setMaterials(getDynamicMaterials(null, 1)); 
       
       api.position.set(
         (Math.random() - 0.5) * 1.5,
@@ -179,9 +191,18 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
   }, [cupStatus, api]);
 
+  // 🚨 [핵심 수정] 멀티플레이어 동기화 로직 (껍데기를 바꾸지 않고 물리적으로 회전시킴)
   useEffect(() => {
     if (isSettledRef.current && syncedValue !== null) {
-      setMaterials(getDynamicMaterials(syncedValue, currentTopFaceRef.current));
+      // 상대방이 굴린 정답(syncedValue)과 내 화면의 물리 결과가 다를 경우,
+      // 텍스처를 억지로 바꾸는 대신 주사위를 정답 숫자로 부드럽게 굴려줍니다.
+      if (currentTopFaceRef.current !== syncedValue) {
+        const target = faces.find(f => f.num === syncedValue);
+        if (target) {
+          targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+          currentTopFaceRef.current = syncedValue;
+        }
+      }
     }
   }, [syncedValue]);
 
@@ -222,19 +243,11 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
 
     const quat = quaternionRef.current;
-    const faces = [
-      { num: 1, vector: new THREE.Vector3(0, -1, 0), targetRot: [Math.PI, 0, 0] }, 
-      { num: 2, vector: new THREE.Vector3(0, 0, 1), targetRot: [-Math.PI/2, 0, 0] },
-      { num: 3, vector: new THREE.Vector3(1, 0, 0), targetRot: [0, 0, Math.PI/2] }, 
-      { num: 4, vector: new THREE.Vector3(-1, 0, 0), targetRot: [0, 0, -Math.PI/2] },
-      { num: 5, vector: new THREE.Vector3(0, 0, -1), targetRot: [Math.PI/2, 0, 0] }, 
-      { num: 6, vector: new THREE.Vector3(0, 1, 0), targetRot: [0, 0, 0] }
-    ];
-
     let maxDot = -Infinity;
     let topFace = 1;
     let finalRot = [0, 0, 0];
     
+    // 하늘 방향(0, 1, 0)과 가장 일치하는 물리적 면(Face) 찾기
     faces.forEach(({ num, vector, targetRot }) => {
       const dot = vector.clone().applyQuaternion(quat).dot(new THREE.Vector3(0, 1, 0));
       if (dot > maxDot) { maxDot = dot; topFace = num; finalRot = targetRot; }
@@ -261,7 +274,8 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
           api.angularVelocity.set(0, 0, 0);
         }
 
-        setMaterials(getDynamicMaterials(syncedValue || face, face));
+        // 💡 텍스처 변경 로직(setMaterials)이 완전히 삭제되었습니다.
+        // 바닥에 떨어져 하늘을 보고 있는 '진짜 물리 결과(face)'를 점수판에 전송합니다!
         if (isMyTurn) onUpdateValue(id, face);
       }
     };
@@ -280,7 +294,8 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   });
 
   return (
-    <mesh ref={ref} material={materials} castShadow visible={visible && !isKept}>
+    // 동적으로 바뀌지 않는 굳건한 staticMaterials 사용
+    <mesh ref={ref} material={staticMaterials} castShadow visible={visible && !isKept}>
       <boxGeometry args={[0.65, 0.65, 0.65]} />
     </mesh>
   );
