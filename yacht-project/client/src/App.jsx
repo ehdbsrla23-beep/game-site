@@ -700,6 +700,7 @@ export default function App() {
             </div>
           </div>
 
+         {/* 👇 여기서부터 끝까지 복사해서 기존 코드 하단을 덮어써주세요! */}
           <div style={{ width: '270px', backgroundColor: '#fff', padding: '12px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', overflowY: 'auto' }}>
             <h3 style={{ textAlign: 'center', margin: '0 0 10px 0', color: '#2c3e50', fontSize: '1.1rem' }}>SCORE BOARD</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -771,7 +772,32 @@ export default function App() {
                       const previewScore = item.calc(diceValues);
 
                       return (
-                        <tr style={{ backgroundColor: '#2980b9', color: '#fff', borderTop: '2px solid #2980b9' }}>
+                        <td 
+                          key={p.id} 
+                          onClick={() => canRecord && recordScore(item.key, previewScore)}
+                          style={{ 
+                            textAlign: 'center', padding: '6px 2px',
+                            cursor: canRecord ? 'pointer' : 'default',
+                            backgroundColor: canRecord ? '#ebf5fb' : 'transparent',
+                            transition: 'background-color 0.2s'
+                          }}
+                        >
+                          {val !== null ? (
+                            <span style={{ fontWeight: 'bold', color: mine ? '#2980b9' : '#333' }}>{val}</span>
+                          ) : (
+                            canRecord ? (
+                              <div style={{ padding: '3px', border: '1px solid #27ae60', borderRadius: '4px', color: '#27ae60', fontWeight: 'bold', fontSize: '0.7rem', backgroundColor: '#e8f8f5' }}>
+                                {previewScore}점 기록
+                              </div>
+                            ) : <span style={{color:'#ccc'}}>-</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+
+                <tr style={{ backgroundColor: '#2980b9', color: '#fff', borderTop: '2px solid #2980b9' }}>
                   <td style={{ padding: '8px 4px', fontWeight: 'bold' }}>TOTAL</td>
                   {gameState.players.map(p => {
                     const total = getTotalScore(p.scores);
@@ -783,7 +809,7 @@ export default function App() {
           </div>
 
           {/* ========================================================= */}
-          {/* 🌟 추가할 부분: 팝업 애니메이션 스타일과 팝업 UI 화면 🌟 */}
+          {/* 🌟 애니메이션 스타일 및 팝업 화면 🌟 */}
           <style>
             {`
               @keyframes scoreFloatUp {
@@ -798,15 +824,15 @@ export default function App() {
 
           {scorePopup && (
             <div style={{
-              position: 'fixed', /* 화면 기준으로 띄움 */
+              position: 'fixed',
               top: '40%',
-              left: '40%', /* 3D 캔버스(왼쪽) 중앙쯤에 오도록 설정 */
+              left: '40%',
               zIndex: 9999,
               fontSize: '5rem',
               fontWeight: '900',
               color: '#FFD700',
               textShadow: '0px 0px 20px rgba(255, 215, 0, 0.8), 2px 4px 0px #d35400',
-              pointerEvents: 'none', /* 마우스 클릭 방해 금지 */
+              pointerEvents: 'none',
               animation: 'scoreFloatUp 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards'
             }}>
               {scorePopup}
