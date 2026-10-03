@@ -4,6 +4,31 @@ import { Physics, useBox, usePlane, useCompoundBody } from '@react-three/cannon'
 import * as THREE from 'three';
 import io from 'socket.io-client';
 
+// 🎵 브라우저 내장 기능을 이용한 경쾌한 효과음 (파일 필요 없음!)
+const playScoreSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    // '띠링~' 하는 느낌을 위해 주파수를 빠르게 높임 (도 -> 높은 도)
+    oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); 
+    oscillator.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.1); 
+
+    // 소리가 부드럽게 사라지도록 볼륨 조절
+    gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {
+    console.warn('오디오를 지원하지 않는 브라우저입니다.');
+  }
+};
 // 🔴 다른 기기에서 접속하려면 localhost 대신 본체 IP(예: 192.168.0.x)로 변경하세요.
 const socket = io.connect('https://game-site-j11p.onrender.com');
 
@@ -341,6 +366,7 @@ function DiceCup({ status }) {
 }
 
 export default function App() {
+  const [scorePopup, setScorePopup] = useState(null);
   const [myId, setMyId] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [maxPlayersSelect, setMaxPlayersSelect] = useState(2);
@@ -456,6 +482,15 @@ export default function App() {
     socket.emit('request_record_score', { category, score });
     setKeepList([false, false, false, false, false]);
     setCupStatus('idle');
+
+    // 🌟 효과음 재생 및 "+몇점" 팝업 띄우기
+    playScoreSound();
+    setScorePopup(`+${score}점`);
+    
+    // 1.5초 뒤에 팝업 다시 숨기기
+    setTimeout(() => {
+      setScorePopup(null);
+    }, 1500);
   };
 
   const handleUpdateValue = (id, value) => {
