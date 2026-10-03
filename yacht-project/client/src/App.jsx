@@ -7,26 +7,46 @@ import io from 'socket.io-client';
 // 🔴 다른 기기에서 접속하려면 localhost 대신 본체 IP(예: 192.168.0.x)로 변경하세요.
 const socket = io.connect('https://game-site-j11p.onrender.com');
 
-const createDiceTexture = (number) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128; canvas.height = 128;
-  const ctx = canvas.getContext('2d');
+import { useRef, useEffect } from 'react';
+import { useBox } from '@react-three/cannon';
 
-  ctx.fillStyle = '#fdfbf7'; ctx.fillRect(0, 0, 128, 128);
-  ctx.strokeStyle = '#e0ded9'; ctx.lineWidth = 8; ctx.strokeRect(0, 0, 128, 128);
-  ctx.fillStyle = '#2c3e50';
+export function Dice({ isKept, ...props }) {
+  // 1. 현재 위치와 각도를 기억할 공간(Ref) 만들기
+  const positionRef = useRef([0, 0, 0]);
+  const rotationRef = useRef([0, 0, 0]);
 
-  const dot = (x, y) => { ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill(); };
-  const c = 64, l = 32, r = 96;
-  if (number === 1) dot(c, c);
-  if (number === 2) { dot(l, l); dot(r, r); }
-  if (number === 3) { dot(l, l); dot(c, c); dot(r, r); }
-  if (number === 4) { dot(l, l); dot(r, l); dot(l, r); dot(r, r); }
-  if (number === 5) { dot(l, l); dot(r, l); dot(c, c); dot(l, r); dot(r, r); }
-  if (number === 6) { dot(l, l); dot(r, l); dot(l, c); dot(r, c); dot(l, r); dot(r, r); }
+  const [ref, api] = useBox(() => ({
+    mass: isKept ? 0 : 1, // 킵 상태면 무게를 0으로 만들어 허공에 고정
+    // 2. 렌더링될 때 기본값이 아닌, 기억해둔 마지막 위치와 각도 사용
+    position: positionRef.current,
+    rotation: rotationRef.current,
+    ...props
+  }));
 
-  return new THREE.CanvasTexture(canvas);
-};
+  // 3. 물리 엔진이 주사위를 굴릴 때마다 실시간으로 현재 위치/각도 백업
+  useEffect(() => {
+    const unsubPos = api.position.subscribe((p) => {
+      positionRef.current = p;
+    });
+    const unsubRot = api.rotation.subscribe((r) => {
+      rotationRef.current = r;
+    });
+
+    // 컴포넌트가 사라질 때 추적 중지
+    return () => {
+      unsubPos();
+      unsubRot();
+    };
+  }, [api]);
+
+  return (
+    <mesh ref={ref}>
+      {/* 주사위 재질 및 형태 코드는 기존 그대로 유지 */}
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="white" />
+    </mesh>
+  );
+}
 
 const diceTextures = [
   createDiceTexture(1), createDiceTexture(2), createDiceTexture(3),
