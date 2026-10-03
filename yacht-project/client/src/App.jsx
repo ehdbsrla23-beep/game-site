@@ -126,7 +126,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     mass: 1,
     args: [0.65, 0.65, 0.65],
     position: isInitiallySettled 
-      ? [initialPos[0], 0.35, initialPos[1]] 
+      ? [initialPos[0], 0.325, initialPos[1]] // 🚨 0.35에서 0.325(바닥 밀착)로 변경
       : [
           (Math.random() - 0.5) * 1.5,
           3.5 + Math.random() * 1.0,
@@ -154,7 +154,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   const prevKept = useRef(isKept);
   const targetQuatRef = useRef(null); 
 
-  // 주사위 6면의 물리적 방향과 회전값 정의
   const faces = [
     { num: 1, vector: new THREE.Vector3(0, -1, 0), targetRot: [Math.PI, 0, 0] }, 
     { num: 2, vector: new THREE.Vector3(0, 0, 1), targetRot: [-Math.PI/2, 0, 0] },
@@ -172,7 +171,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
-  // 킵 해제 시, 강제로 6이 되지 않고 원래 가지고 있던 번호의 각도로 복구
+  // 🚨 [핵심 수정] 킵 해제 시 물리 엔진 충돌 방지 로직
   useEffect(() => {
     if (isKept) {
       api.mass.set(0); 
@@ -182,13 +181,19 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       const target = faces.find(f => f.num === targetNum);
       
       if (target) {
-        targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+        // 부드럽게 도는 애니메이션(slerp)을 버리고 즉시 완벽한 정답 각도로 강제 꽂음
+        const exactQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(...target.targetRot));
+        api.quaternion.set(exactQuat.x, exactQuat.y, exactQuat.z, exactQuat.w);
+        quaternionRef.current.copy(exactQuat);
       }
       currentTopFaceRef.current = targetNum;
       
-      api.position.set(initialPos[0], 0.35, initialPos[1]);
+      // 높이를 주사위 크기의 절반(0.65 / 2 = 0.325)으로 설정해 바닥과 충돌(튕김)을 원천 차단
+      api.position.set(initialPos[0], 0.325, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
+      
+      targetQuatRef.current = null; // slerp 무효화
     }
     prevKept.current = isKept;
   }, [isKept, api, initialPos, syncedValue]);
@@ -216,11 +221,8 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
   }, [cupStatus, api]);
 
-  // 🚨 [핵심 수정] 멀티플레이어 동기화 로직 (껍데기를 바꾸지 않고 물리적으로 회전시킴)
   useEffect(() => {
     if (isSettledRef.current && syncedValue !== null) {
-      // 상대방이 굴린 정답(syncedValue)과 내 화면의 물리 결과가 다를 경우,
-      // 텍스처를 억지로 바꾸는 대신 주사위를 정답 숫자로 부드럽게 굴려줍니다.
       if (currentTopFaceRef.current !== syncedValue) {
         const target = faces.find(f => f.num === syncedValue);
         if (target) {
@@ -272,7 +274,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     let topFace = 1;
     let finalRot = [0, 0, 0];
     
-    // 하늘 방향(0, 1, 0)과 가장 일치하는 물리적 면(Face) 찾기
     faces.forEach(({ num, vector, targetRot }) => {
       const dot = vector.clone().applyQuaternion(quat).dot(new THREE.Vector3(0, 1, 0));
       if (dot > maxDot) { maxDot = dot; topFace = num; finalRot = targetRot; }
@@ -294,13 +295,12 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
         
         if (forceSnap) {
           targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
-          api.position.set(positionRef.current[0], 0.35, positionRef.current[2]);
+          // 🚨 여기서도 0.35에서 0.325로 수정
+          api.position.set(positionRef.current[0], 0.325, positionRef.current[2]);
           api.velocity.set(0, 0, 0);
           api.angularVelocity.set(0, 0, 0);
         }
 
-        // 💡 텍스처 변경 로직(setMaterials)이 완전히 삭제되었습니다.
-        // 바닥에 떨어져 하늘을 보고 있는 '진짜 물리 결과(face)'를 점수판에 전송합니다!
         if (isMyTurn) onUpdateValue(id, face);
       }
     };
@@ -319,12 +319,12 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   });
 
   return (
-    // 동적으로 바뀌지 않는 굳건한 staticMaterials 사용
     <mesh ref={ref} material={staticMaterials} castShadow visible={visible && !isKept}>
       <boxGeometry args={[0.65, 0.65, 0.65]} />
     </mesh>
   );
 }
+
 function DiceCup({ status }) {
   const [ref, api] = useCompoundBody(() => ({
     mass: 0, type: 'Kinematic', position: [0, 15, -10],
