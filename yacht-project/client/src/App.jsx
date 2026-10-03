@@ -123,6 +123,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   );
 
   const prevKept = useRef(isKept);
+  const targetQuatRef = useRef(null); // 🌟 스무딩(자석 효과)을 위해 목표 각도를 임시 저장하는 곳
 
   useEffect(() => {
     const unsubPos = api.position.subscribe((p) => positionRef.current = p);
@@ -132,20 +133,17 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     return () => { unsubPos(); unsubRot(); unsubVel(); unsubAng(); };
   }, [api]);
 
-  // 킵 해제 시 물리엔진 정방향 복귀
+  // 🚨 [핵심 수정 1] 킵 해제 시 강제로 6(정방향)으로 돌려버리던 버그 수정
   useEffect(() => {
     if (prevKept.current && !isKept) {
+      // 위치만 초기 자리로 돌려놓고, 기존에 갖고 있던 각도(숫자)와 텍스처는 건드리지 않습니다!
       api.position.set(initialPos[0], 0.35, initialPos[1]);
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
-      api.rotation.set(0, 0, 0); 
-      currentTopFaceRef.current = 6;
-      setMaterials(getDynamicMaterials(syncedValue || 6, 6));
     }
     prevKept.current = isKept;
-  }, [isKept, api, initialPos, syncedValue]);
+  }, [isKept, api, initialPos]);
 
-  // 컵 흔들기 및 뿌리기 속도 지정
   useEffect(() => {
     if (cupStatus === 'shaking') {
       isSettledRef.current = false;
@@ -153,6 +151,7 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
       stuckFramesRef.current = 0;
       dropFramesRef.current = 0;
       spillFramesRef.current = 0;
+      targetQuatRef.current = null; // 컵에 들어가면 스무딩 효과 리셋
       setMaterials(getDynamicMaterials(null, 1)); 
       
       api.position.set(
@@ -169,7 +168,6 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
     }
   }, [cupStatus, api]);
 
-  // 서버 통신 값 확정시 텍스처 업데이트
   useEffect(() => {
     if (isSettledRef.current && syncedValue !== null) {
       setMaterials(getDynamicMaterials(syncedValue, currentTopFaceRef.current));
@@ -177,11 +175,21 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
   }, [syncedValue]);
 
   useFrame(() => {
-    // ⭐️ 삭제(Unmount) 대신 보이지 않거나 킵된 주사위는 물리엔진 간섭을 막기 위해 지하(-100)로 텔레포트
     if (!visible || isKept) {
       api.position.set(id * 2, -100, 0); 
       api.velocity.set(0, 0, 0);
       api.angularVelocity.set(0, 0, 0);
+      return;
+    }
+
+    // 🌟 [핵심 수정 2] 모서리에 걸려 억지로 눕혀야 할 때(forceSnap), 부드럽게 스르륵(Lerp) 회전시킵니다.
+    if (targetQuatRef.current) {
+      quaternionRef.current.slerp(targetQuatRef.current, 0.15); // 0.15 속도로 부드럽게 회전
+      api.quaternion.set(quaternionRef.current.x, quaternionRef.current.y, quaternionRef.current.z, quaternionRef.current.w);
+      // 목표 각도에 거의 도달하면 스무딩 멈춤
+      if (quaternionRef.current.angleTo(targetQuatRef.current) < 0.05) {
+        targetQuatRef.current = null; 
+      }
       return;
     }
 
@@ -238,7 +246,9 @@ function Dice({ id, onUpdateValue, isKept, cupStatus, isMyTurn, syncedValue, ini
         currentTopFaceRef.current = face;
         
         if (forceSnap) {
-          api.rotation.set(...targetRotArr);
+          // 순식간에 꺾이던 api.rotation.set()을 지우고, 목표 각도(targetQuat)만 지정해줍니다.
+          targetQuatRef.current = new THREE.Quaternion().setFromEuler(new THREE.Euler(...targetRotArr));
+          
           api.position.set(positionRef.current[0], 0.35, positionRef.current[2]);
           api.velocity.set(0, 0, 0);
           api.angularVelocity.set(0, 0, 0);
